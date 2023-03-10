@@ -13,6 +13,7 @@ struct
 open S
 
 structure Compile = Compile ()
+structure Chialisp = Chialisp ()
 
 structure Place =
    struct
@@ -986,7 +987,13 @@ fun makeOptions {usage} =
             Result.Yes () => ()
           | Result.No s => usage (concat ["invalid -xml-passes arg: ", s]))),
        (Expert, "zone-cut-depth", " <n>", "zone cut depth",
-        intRef zoneCutDepth)
+        intRef zoneCutDepth),
+       (Normal, "read-ssa-json", "", "read ssa json",
+        SpaceString
+            (fn s =>
+                Chialisp.readSsaJson s
+            )
+       )
        ],
        fn (style, name, arg, desc, opt) =>
        {arg = arg, desc = desc, name = name, opt = opt, style = style})

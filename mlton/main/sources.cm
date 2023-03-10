@@ -17,6 +17,7 @@ is
 ../ast/sources.cm
 ../atoms/sources.cm
 ../backend/sources.cm
+../chialisp/sources.cm
 ../closure-convert/sources.cm
 ../codegen/sources.cm
 ../control/sources.cm

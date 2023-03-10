@@ -1,0 +1,11 @@
+local
+   $(SML_LIB)/smlnj-lib/JSON/json-lib.mlb
+   
+   ../../lib/mlton/sources.mlb
+
+   chialisp.sig
+   chialisp.fun
+in
+  signature CHIALISP
+  functor Chialisp
+end

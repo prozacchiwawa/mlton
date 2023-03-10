@@ -12,6 +12,7 @@ local
    ../ast/sources.mlb
    ../atoms/sources.mlb
    ../backend/sources.mlb
+   ../chialisp/sources.mlb
    ../closure-convert/sources.mlb
    ../codegen/sources.mlb
    ../control/sources.mlb

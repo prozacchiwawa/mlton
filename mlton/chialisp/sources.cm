@@ -1,0 +1,11 @@
+Library
+
+signature CHIALISP
+functor Chialisp
+
+is
+
+../../lib/mlton/sources.cm
+
+chialisp.sig
+chialisp.fun
