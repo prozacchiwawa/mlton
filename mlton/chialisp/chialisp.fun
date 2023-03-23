@@ -16,10 +16,8 @@ datatype CLLetFormKind = CLLFSequential
                        | CLLFParallel
 
 and CLBinding = CLBinding of { name: String.t, body: CLBodyForm }
-and CLLetData = CLLetData of { bindings: CLBinding list }
-
 and CLBodyForm =
-         CLLet of {kind: CLLetFormKind, data: CLLetData}
+         CLLet of {kind: CLLetFormKind, bindings: CLBinding list, body: CLBodyForm}
        | CLQuoted of CLSExp
        | CLValue of CLSExp
        | CLCall of CLBodyForm list
@@ -183,9 +181,24 @@ fun selectInArray (n: int) (j: JSON.value) =
           | _ => NONE
     end
 
+fun selectKey (key: String.t) (j: JSON.value) =
+    let
+        fun findKey lst =
+            case lst of
+                [] => NONE
+              | (k,v) :: tl =>
+                if String.compare (k,key) = EQUAL then
+                    SOME v
+                else
+                    findKey tl
+    in
+        case j of
+            JSON.OBJECT l => findKey l
+          | _ => NONE
+    end
+
 fun intArrayToString (j: JSON.value) =
     let
-        val _ = print "intArrayToString"
         fun ias is =
             let
                 open List
@@ -198,20 +211,77 @@ fun intArrayToString (j: JSON.value) =
                 String.concat (reverse mapped)
             end
     in
-        optionMap ias (decodeListOf decodeInt (debugOutputJSON j))
+        optionMap ias (decodeListOf decodeInt j)
+    end
+
+fun fold_left f s l =
+    let
+        fun fl s l =
+            case l of
+                [] => s
+              | hd :: tl =>
+                let
+                    val new_s = f s hd
+                in
+                    fl new_s tl
+                end
+    in
+        fl s l
+    end
+
+fun intArrayToBigint (j: JSON.value) =
+    let
+        open List
+        open String
+        open IntInf
+
+        val zero = IntInf.fromInt 0
+        val eight_bits = IntInf.fromInt 256
+        val per_digit = eight_bits * eight_bits * eight_bits * eight_bits
+
+        fun combine a e = a * per_digit + e
+    in
+        optionMap
+            (fold_left combine zero)
+            (optionBind
+                 (decodeListOf decodeInt)
+                 (selectInArray 1 j)
+            )
     end
 
 fun decodeAtom (j: JSON.value) =
-    let
-        val _ = print "decodeAtom"
-    in
-        optionMap
-            (fn s => CLAtom s)
-            (optionBind
-                 intArrayToString
-                 (selectInArray 1 (debugOutputJSON j))
-            )
-    end
+    optionMap
+        (fn s => CLAtom s)
+        (optionBind
+             intArrayToString
+             (selectInArray 1 j)
+        )
+
+fun decodeJSString (j: JSON.value) =
+    case j of
+        JSON.STRING s => SOME s
+      | _ => NONE
+
+fun decodeBool (j: JSON.value) =
+    case j of
+        JSON.BOOL b => SOME b
+      | _ => NONE
+
+fun decodeString (j: JSON.value) =
+    optionMap
+        (fn s => CLString s)
+        (optionBind
+             intArrayToString
+             (selectInArray 2 j)
+        )
+
+fun decodeInteger (j: JSON.value) =
+    optionMap
+        (fn i => CLInteger i)
+        (optionBind
+             intArrayToBigint
+             (selectInArray 1 j)
+        )
 
 fun decodeSExp (j: JSON.value) =
     let
@@ -219,6 +289,8 @@ fun decodeSExp (j: JSON.value) =
             decodeJsonAlternatives j [
                 ("Nil", fn _ => SOME CLNil),
                 ("Atom", decodeAtom),
+                ("QuotedString",decodeString),
+                ("Integer", decodeInteger),
                 ("Cons", decodeCons)
             ]
 
@@ -240,16 +312,315 @@ fun decodeSExp (j: JSON.value) =
         decodeSExp j
     end
 
-fun decodeSExpFromJSON (s: String.t) =
+datatype DecodeBHC =
+         DecodeBody of CLBodyForm option
+       | DecodeHelper of CLHelperForm option
+       | DecodeCompile of CLCompileForm option
+
+fun decodeBHC (kind: DecodeBHC) (j: JSON.value): DecodeBHC =
+    let
+        fun decodeBinding j =
+            let
+                val name = optionBind intArrayToString (selectKey "name" j)
+                val body = optionBind decodeBodyForm (selectKey "body" j)
+            in
+                case (name, body) of
+                    (SOME name, SOME body) => SOME (CLBinding { name = name, body = body })
+                  | _ => NONE
+            end
+
+        and decodeLetData (kind: String.t) j =
+            let
+                val bindings =
+                    optionBind
+                        (decodeListOf decodeBinding)
+                        (selectKey "bindings" j)
+                val body =
+                    optionBind decodeBodyForm (selectKey "body" j)
+                val ourKind =
+                    if String.compare (kind, "Parallel") = EQUAL then
+                        CLLFParallel
+                    else
+                        CLLFSequential
+            in
+                case (bindings, body) of
+                    (SOME bindings, SOME body) => SOME (CLLet {kind = ourKind, bindings = bindings, body = body})
+                  | _ => NONE
+            end
+
+        and decodeLetForm (j: JSON.value) =
+            optionBind
+                (fn kind =>
+                    optionBind (decodeLetData kind) (selectInArray 1 j)
+                )
+                (optionBind decodeJSString (selectInArray 0 j))
+
+        and decodeMod (j: JSON.value) =
+            optionMap
+                (fn m => CLMod m)
+                (optionBind
+                     decodeCompileForm
+                     (selectInArray 0 j)
+                )
+
+        and decodeBodyForm (j: JSON.value) = decodeJsonAlternatives j [
+            ("Value",
+             fn j =>
+                optionMap
+                    (fn s => CLValue s)
+                    (decodeSExp j)
+            ),
+            ("Quoted",
+             fn j =>
+                optionMap
+                    (fn s => CLQuoted s)
+                    (decodeSExp j)
+            ),
+            ("Call",
+             fn j =>
+                optionMap
+                    (fn args => CLCall args)
+                    (optionBind
+                         (decodeListOf decodeBodyForm)
+                         (selectInArray 1 j)
+                    )
+            ),
+            ("Let", decodeLetForm),
+            ("Mod", decodeMod)
+            ]
+
+        and decodeDefunData inline ddata =
+            let
+                val name = optionBind intArrayToString (selectKey "name" ddata)
+                val args = optionBind decodeSExp (selectKey "args" ddata)
+                val body = optionBind decodeBodyForm (selectKey "body" ddata)
+            in
+                case (name, args, body) of
+                    (SOME name, SOME args, SOME body) =>
+                    SOME (CLDefun {inline=inline, name=name, args=args, body=body})
+                  | _ => NONE
+            end
+
+        and decodeDefun (j: JSON.value) =
+            let
+                val inline = optionBind decodeBool (selectInArray 0 j)
+                val ddata = selectInArray 1 j
+            in
+                case (inline, ddata) of
+                    (SOME inline, SOME ddata) => decodeDefunData inline ddata
+                  | _ => NONE
+            end
+
+        and decodeMacro (j: JSON.value) =
+            NONE
+
+        and decodeConst (j: JSON.value) =
+            NONE
+
+        and decodeHelperForm (j: JSON.value) = decodeJsonAlternatives j [
+            ("Defun", decodeDefun),
+            ("Defmacro", decodeMacro),
+            ("Defconst", decodeConst)
+        ]
+
+        and decodeCompileFormInner (args: JSON.value) (helpers: JSON.value) (exp: JSON.value): CLCompileForm option =
+            let
+                val decodedArgs = decodeSExp args
+                val decodedHelpers = decodeListOf decodeHelperForm helpers
+                val decodedExp = decodeBodyForm exp
+            in
+                case (decodedArgs, decodedHelpers, decodedExp) of
+                    (SOME da, SOME dh, SOME de) => SOME (CLCompileForm { args = da, helpers = dh, body = de })
+                  | _ => NONE
+            end
+
+        and decodeCompileForm (j: JSON.value): CLCompileForm option =
+            case (selectKey "args" j, selectKey "helpers" j, selectKey "exp" j) of
+                (SOME args, SOME helpers, SOME exp) =>
+                decodeCompileFormInner args helpers exp
+              | _ => NONE
+    in
+        case kind of
+            DecodeBody _ => DecodeBody (decodeBodyForm j)
+          | DecodeHelper _ => DecodeHelper (decodeHelperForm j)
+          | DecodeCompile _ => DecodeCompile (decodeCompileForm j)
+    end
+
+fun decodeCompileForm (j: JSON.value) =
+    case decodeBHC (DecodeCompile NONE) j of
+        DecodeCompile c => c
+      | _ => NONE
+
+fun toSExpList (toSExp: 'a -> CLSExp) (l: 'a list) (tail: CLSExp) =
+    let
+        fun makeRest l =
+            case l of
+                [] => tail
+              | hd :: tl =>
+                let
+                    val rest = makeRest tl
+                in
+                    CLCons {f = (toSExp hd), r = rest}
+                end
+    in
+        makeRest l
+    end
+
+fun clformToSExp decodeBHC =
+    let
+        fun baseCompileFormToSExp args helpers body =
+            let
+                val expList = CLCons {f = bodyFormToSExp body, r = CLNil}
+                val helperList = toSExpList helperFormToSExp helpers expList
+            in
+                CLCons
+                    {
+                      f = args,
+                      r = helperList
+                    }
+            end
+
+        and bindingToSExp (CLBinding {name:string, body:CLBodyForm}) =
+            CLCons
+                {
+                  f = CLAtom name,
+                  r =
+                  CLCons
+                      {
+                        f = bodyFormToSExp body,
+                        r = CLNil
+                      }
+                }
+
+        and bodyFormToSExp b =
+            case b of
+                CLQuoted q =>
+                CLCons
+                    {
+                      f = CLAtom "q",
+                      r = q
+                    }
+              | CLValue (CLAtom a) => CLAtom a
+              | CLValue v => bodyFormToSExp (CLQuoted v)
+              | CLCall args => toSExpList bodyFormToSExp args CLNil
+              | CLMod (CLCompileForm {args:CLSExp,helpers:CLHelperForm list,body:CLBodyForm}) =>
+                CLCons
+                    {
+                      f = CLAtom "mod",
+                      r = baseCompileFormToSExp args helpers body
+                    }
+              | CLLet {kind:CLLetFormKind,bindings:CLBinding list,body:CLBodyForm} =>
+                let
+                    val kw =
+                        case kind of
+                            CLLFSequential => "let*"
+                          | CLLFParallel => "let"
+
+                    val bindings = toSExpList bindingToSExp bindings CLNil
+                    val body = bodyFormToSExp body
+                in
+                    CLCons
+                        {
+                          f = CLAtom kw,
+                          r =
+                          CLCons
+                              {
+                                f = bindings,
+                                r =
+                                CLCons
+                                    {
+                                      f = body,
+                                      r = CLNil
+                                    }
+                              }
+                        }
+                end
+
+        and macroToSExp name margs (CLCompileForm { args:CLSExp, helpers:CLHelperForm list,body:CLBodyForm}) =
+            CLCons
+                {
+                  f = CLAtom "defmacro",
+                  r =
+                  CLCons
+                      {
+                        f = CLAtom name,
+                        r = baseCompileFormToSExp args helpers body
+                      }
+                }
+
+        and helperFormToSExp h =
+            case h of
+                CLDefun {inline:bool,name:string,args:CLSExp,body:CLBodyForm} =>
+                if inline then
+                    CLCons
+                        {
+                          f = CLAtom "defun-inline",
+                          r =
+                          CLCons
+                              {
+                                f = CLAtom name,
+                                r = baseCompileFormToSExp args [] body
+                              }
+                        }
+                else
+                    CLCons
+                        {
+                          f = CLAtom "defun",
+                          r =
+                          CLCons
+                              {
+                                f = CLAtom name,
+                                r = baseCompileFormToSExp args [] body
+                              }
+                        }
+              | CLDefmacro {name:string, args:CLSExp, body:CLCompileForm} =>
+                macroToSExp name args body
+              | CLDefconst {name:string, body:CLBodyForm} =>
+                CLCons
+                    {
+                      f = CLAtom "defconstant",
+                      r =
+                      CLCons
+                          {
+                            f = CLAtom name,
+                            r =
+                            CLCons
+                                {
+                                  f = bodyFormToSExp body,
+                                  r = CLNil
+                                }
+                          }
+                    }
+
+        and compileFormToSExpInner args helpers body =
+            CLCons
+                {
+                  f = CLAtom "mod",
+                  r = baseCompileFormToSExp args helpers body
+                }
+
+        and compileFormToSExp (CLCompileForm {args:CLSExp, helpers:CLHelperForm list, body:CLBodyForm}) =
+            compileFormToSExpInner args helpers body
+    in
+        case decodeBHC of
+            DecodeBody (SOME b) => bodyFormToSExp b
+          | DecodeHelper (SOME h) => helperFormToSExp h
+          | DecodeCompile (SOME c) => compileFormToSExp c
+          | _ => CLNil
+    end
+
+fun compileFormToSExp cf = clformToSExp (DecodeCompile (SOME cf))
+
+fun decodeFromJSON f (s: String.t) =
     let
         open JSON
     in
-        decodeSExp (JSONParser.parseFile s)
+        f (JSONParser.parseFile s)
     end
 
 fun readSsaJson (fname: String.t) =
-    case decodeSExpFromJSON fname of
-        SOME s => print (sexpToDebugString s)
+    case decodeFromJSON decodeCompileForm fname of
+        SOME s => print (sexpToDebugString (compileFormToSExp s))
       | NONE => print "didn't decode"
 
 end
