@@ -502,7 +502,7 @@ fun clformToSExp decodeBHC =
                     }
               | CLValue (CLAtom a) => CLAtom a
               | CLValue v => bodyFormToSExp (CLQuoted v)
-              | CLCall args => toSExpList bodyFormToSExp args CLNil
+              | CLCall args => toSExpList bodyFormToSExp (reverse args) CLNil
               | CLMod (CLCompileForm {args:CLSExp,helpers:CLHelperForm list,body:CLBodyForm}) =>
                 CLCons
                     {
