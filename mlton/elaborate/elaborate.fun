@@ -21,6 +21,11 @@ in
    structure Decs = Decs
 end
 
+structure Programs = ElaboratePrograms (structure Ast = Ast
+                                        structure CoreML = CoreML
+                                        structure Decs = Decs
+                                        structure Env = Env)
+
 structure ElaborateMLBs = ElaborateMLBs (structure Ast = Ast
                                          structure CoreML = CoreML
                                          structure Decs = Decs

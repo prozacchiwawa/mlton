@@ -23,6 +23,7 @@ signature ELABORATE =
       include ELABORATE_STRUCTS
 
       structure Env: ELABORATE_ENV
+      structure Programs: ELABORATE_PROGRAMS
 
       val elaborateMLB:
          Ast.Basdec.t * {addPrim: Env.t -> CoreML.Dec.t list}

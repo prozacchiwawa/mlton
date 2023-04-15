@@ -38,6 +38,9 @@ structure CoreML = CoreML (open Atoms
                                             layoutPrettyTycon = Tycon.layout,
                                             layoutPrettyTyvar = Tyvar.layout}))
                            end)
+structure Elaborate = Elaborate (structure Ast = Ast
+                                 structure CoreML = CoreML
+                                 structure TypeEnv = TypeEnv)
 structure Wrap = Region.Wrap
 
 (* Mirror of chialisp HelperForm and BodyForm *)
@@ -716,6 +719,13 @@ fun chialispToML (bf: CLBodyForm): Ast.Program.t =
             Wrap.makeRegion (clStrdec, region)
     in
         Ast.Program.T [[clTopdec]]
+    end
+
+fun frontendChialispToCoreDecs (fe: Ast.Program.t): Elaborate.Env.Decs.t =
+    let
+        open Elaborate
+    in
+        Programs.elaborateProgram (fe, {env=Env.empty ()})
     end
 
 fun readSsaJson (fname: String.t) =
