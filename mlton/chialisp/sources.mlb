@@ -2,10 +2,15 @@ local
    $(SML_LIB)/smlnj-lib/JSON/json-lib.mlb
    
    ../../lib/mlton/sources.mlb
+   ../ast/sources.mlb
+   ../atoms/sources.mlb
+   ../core-ml/sources.mlb
+   ../control/sources.mlb
+   ../front-end/sources.mlb
+   ../elaborate/sources.mlb
 
    chialisp.sig
    chialisp.fun
 in
-  signature CHIALISP
   functor Chialisp
 end

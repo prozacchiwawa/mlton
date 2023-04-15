@@ -1,11 +1,16 @@
 Library
 
-signature CHIALISP
 functor Chialisp
 
 is
 
 ../../lib/mlton/sources.cm
+../ast/sources.cm
+../atoms/sources.cm
+../core-ml/sources.cm
+../control/sources.cm
+../front-end/sources.cm
+../elaborate/sources.cm
 
 chialisp.sig
 chialisp.fun

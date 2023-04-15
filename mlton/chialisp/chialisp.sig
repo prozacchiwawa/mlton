@@ -1,10 +1,10 @@
 signature CHIALISP_STRUCTS =
-  sig
-  end
+sig
+end
 
 signature CHIALISP =
-  sig
+sig
     include CHIALISP_STRUCTS
 
     val readSsaJson: String.t -> unit
-  end
+end

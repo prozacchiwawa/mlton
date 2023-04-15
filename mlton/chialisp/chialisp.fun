@@ -3,6 +3,43 @@ struct
 
 open S
 
+(* Mirror compile.fun *)
+
+
+structure Atoms = Atoms ()
+
+local
+  open Atoms
+in
+  structure Symbol = Symbol
+  structure Con = Con
+end
+
+structure Ast = Ast (open Atoms)
+structure FrontEnd = FrontEnd (structure Ast = Ast)
+
+structure TypeEnv = TypeEnv (open Atoms)
+structure Con = TypeEnv.Con
+structure Tycon = TypeEnv.Tycon
+structure CoreML = CoreML (open Atoms
+                           structure Type =
+                           struct
+                           open TypeEnv.Type
+
+                           val makeHom =
+                            fn {con, var} =>
+                               makeHom {con = con,
+                                        expandOpaque = true,
+                                        var = var}
+
+                           fun layout t =
+                               #1 (layoutPretty
+                                       (t, {expandOpaque = true,
+                                            layoutPrettyTycon = Tycon.layout,
+                                            layoutPrettyTyvar = Tyvar.layout}))
+                           end)
+structure Wrap = Region.Wrap
+
 (* Mirror of chialisp HelperForm and BodyForm *)
 datatype CLSExp =
    CLNil
@@ -616,6 +653,69 @@ fun decodeFromJSON f (s: String.t) =
         open JSON
     in
         f (JSONParser.parseFile s)
+    end
+
+val conFromString =
+    let
+        open Ast.Con
+    in
+        fromSymbol
+    end
+
+fun chialispToML (bf: CLBodyForm): Ast.Program.t =
+    let
+        open Wrap
+        open Ast
+
+        val region: Region.t = Region.make {left=SourcePos.bogus, right=SourcePos.bogus}
+
+        (* Build the atom constructor *)
+        val clAtomCon: Con.t =
+            Con.fromSymbol (Symbol.fromString "CLAtom", region)
+
+        val clConsCon: Con.t =
+            Con.fromSymbol (Symbol.fromString "CLCons", region)
+
+        val clTypeCon: Tycon.t =
+            Tycon.fromSymbol (Symbol.fromString "CLSExp", region)
+
+        val intInfLongtycon = Longtycon.fromSymbols ([Symbol.fromString "IntInf", Symbol.fromString "t"], region)
+        val clTypeLongtycon = Longtycon.fromSymbols ([Symbol.fromString "CLSExp"], region)
+        val intInfType = Wrap.makeRegion (Type.Con (intInfLongtycon, Vector.fromList []), region)
+        val clType = Wrap.makeRegion (Type.Con (clTypeLongtycon, Vector.fromList []), region)
+
+        val clSExpDatBind =
+            Wrap.makeRegion (
+                DatBind.T
+                    {datatypes=
+                     (Vector.fromList [{cons=
+                                        (Vector.fromList [
+                                              (clAtomCon, SOME intInfType),
+                                              (clConsCon, SOME (Type.tuple (Vector.fromList [clType, clType])))
+                                        ]),
+                                        tycon=clTypeCon,
+                                        tyvars=Vector.fromList []
+                     }]),
+                     withtypes=TypBind.empty
+                    },
+                region
+            )
+        val clDtRhs = Wrap.makeRegion (DatatypeRhs.DatBind clSExpDatBind, region)
+        val clDec = Wrap.makeRegion (Dec.Datatype clDtRhs, region)
+        val clTypeStrdec = Wrap.makeRegion (Strdec.Core clDec, region)
+        val clStrdec =
+            Topdec.Strdec
+                (Wrap.makeRegion
+                     (Strdec.Seq
+                          [ clTypeStrdec
+                          ],
+                      region
+                     )
+                )
+        val clTopdec =
+            Wrap.makeRegion (clStrdec, region)
+    in
+        Ast.Program.T [[clTopdec]]
     end
 
 fun readSsaJson (fname: String.t) =
