@@ -658,34 +658,87 @@ fun decodeFromJSON f (s: String.t) =
         f (JSONParser.parseFile s)
     end
 
-val conFromString =
-    let
-        open Ast.Con
-    in
-        fromSymbol
-    end
-
-fun chialispToML (bf: CLBodyForm): Ast.Program.t =
+fun toStrdec (dec: Ast.Dec.t): Ast.Strdec.t =
     let
         open Wrap
         open Ast
 
-        val region: Region.t = Region.make {left=SourcePos.bogus, right=SourcePos.bogus}
+        val region: Region.t =
+            Region.make {left=SourcePos.bogus, right=SourcePos.bogus}
+    in
+        Wrap.makeRegion (Strdec.Core dec, region)
+    end
+
+fun toStrdecs (decs: Ast.Strdec.t list): Ast.Strdec.t =
+    let
+        open Wrap
+        open Ast
+
+        val region: Region.t =
+            Region.make {left=SourcePos.bogus, right=SourcePos.bogus}
+    in
+        Wrap.makeRegion (Strdec.Seq decs, region)
+    end
+
+fun toTopdec (dec: Ast.Strdec.t): Ast.Topdec.t =
+    let
+        open Wrap
+        open Ast
+
+        val region: Region.t =
+            Region.make {left=SourcePos.bogus, right=SourcePos.bogus}
+    in
+        Wrap.makeRegion (Ast.Topdec.Strdec dec, region)
+    end
+
+fun programFromDecs (decs: Ast.Dec.t list): Ast.Program.t =
+    let
+        open Wrap
+        open Ast
+
+        val region: Region.t =
+            Region.make {left=SourcePos.bogus, right=SourcePos.bogus}
+
+        val strdecs: Ast.Strdec.t list = map toStrdec decs
+
+        val topStrdec: Ast.Strdec.t = toStrdecs strdecs
+    in
+        Ast.Program.T [ [ toTopdec topStrdec ] ]
+    end
+
+val typeDeclForChialisp: Ast.Dec.t =
+    let
+        open Wrap
+        open Ast
+        open Atoms
+
+        val region: Region.t =
+            Region.make {left=SourcePos.bogus, right=SourcePos.bogus}
 
         (* Build the atom constructor *)
-        val clAtomCon: Con.t =
-            Con.fromSymbol (Symbol.fromString "CLAtom", region)
+        val clAtomCon: Ast.Con.t =
+            Ast.Con.fromSymbol (Symbol.fromString "CLAtom", region)
 
-        val clConsCon: Con.t =
-            Con.fromSymbol (Symbol.fromString "CLCons", region)
+        val clConsCon: Ast.Con.t =
+            Ast.Con.fromSymbol (Symbol.fromString "CLCons", region)
 
-        val clTypeCon: Tycon.t =
-            Tycon.fromSymbol (Symbol.fromString "CLSExp", region)
+        val clTypeCon: Ast.Tycon.t =
+            Ast.Tycon.fromSymbol (Symbol.fromString "CLSExp", region)
 
-        val intInfLongtycon = Longtycon.fromSymbols ([Symbol.fromString "IntInf", Symbol.fromString "t"], region)
-        val clTypeLongtycon = Longtycon.fromSymbols ([Symbol.fromString "CLSExp"], region)
-        val intInfType = Wrap.makeRegion (Type.Con (intInfLongtycon, Vector.fromList []), region)
-        val clType = Wrap.makeRegion (Type.Con (clTypeLongtycon, Vector.fromList []), region)
+        val intInfLongtycon =
+            Longtycon.fromSymbols
+                ([Symbol.fromString "IntInf", Symbol.fromString "t"], region)
+
+        val clTypeLongtycon =
+            Longtycon.fromSymbols ([Symbol.fromString "CLSExp"], region)
+
+        val intInfType =
+            Wrap.makeRegion
+                (Type.Con (intInfLongtycon, Vector.fromList []), region)
+
+        val clType =
+            Wrap.makeRegion
+                (Type.Con (clTypeLongtycon, Vector.fromList []), region)
 
         val clSExpDatBind =
             Wrap.makeRegion (
@@ -703,22 +756,50 @@ fun chialispToML (bf: CLBodyForm): Ast.Program.t =
                     },
                 region
             )
+
         val clDtRhs = Wrap.makeRegion (DatatypeRhs.DatBind clSExpDatBind, region)
-        val clDec = Wrap.makeRegion (Dec.Datatype clDtRhs, region)
-        val clTypeStrdec = Wrap.makeRegion (Strdec.Core clDec, region)
-        val clStrdec =
-            Topdec.Strdec
-                (Wrap.makeRegion
-                     (Strdec.Seq
-                          [ clTypeStrdec
-                          ],
-                      region
-                     )
-                )
-        val clTopdec =
-            Wrap.makeRegion (clStrdec, region)
     in
-        Ast.Program.T [[clTopdec]]
+        Wrap.makeRegion (Dec.Datatype clDtRhs, region)
+    end
+
+fun chialispToML
+        (CLCompileForm {
+             args: CLSExp,
+             helpers: CLHelperForm list,
+             body: CLBodyForm
+        }): Ast.Program.t =
+    let
+        open Wrap
+        open Ast
+
+        fun convertDefunDeclaration name args body =
+            []
+
+        fun convertDefconstDeclaration name body =
+            []
+
+        fun convertHelperDeclaration (decl: CLHelperForm) =
+            case decl of
+                CLDefun {inline, name, args, body} =>
+                convertDefunDeclaration name args body
+              | CLDefmacro dm => []
+              | CLDefconst {name, body} => convertDefconstDeclaration name body
+
+        val helperDeclarations: Ast.Dec.t list =
+            []
+
+        val mainFunction: Ast.Dec.t list =
+            []
+    in
+        programFromDecs
+            (
+              List.concat
+                  [
+                    [typeDeclForChialisp],
+                    helperDeclarations,
+                    mainFunction
+                  ]
+            )
     end
 
 fun frontendChialispToCoreDecs (fe: Ast.Program.t): Elaborate.Env.Decs.t =
