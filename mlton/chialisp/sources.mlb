@@ -8,6 +8,7 @@ local
    ../control/sources.mlb
    ../front-end/sources.mlb
    ../elaborate/sources.mlb
+   ../xml/sources.mlb
 
    chialisp.sig
    chialisp.fun

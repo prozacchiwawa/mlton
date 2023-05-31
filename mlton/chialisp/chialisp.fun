@@ -772,13 +772,66 @@ fun chialispToML
         open Wrap
         open Ast
 
-        fun convertDefunDeclaration name args body =
-            []
+        val region: Region.t =
+            Region.make {left=SourcePos.bogus, right=SourcePos.bogus}
 
-        fun convertDefconstDeclaration name body =
-            []
+        fun convertExpression (exp: CLBodyForm): Ast.Exp.t =
+            Wrap.makeRegion (Ast.Exp.Const (Wrap.makeRegion (Ast.Const.Int (IntInf.fromInt 0), region)), region)
 
-        fun convertHelperDeclaration (decl: CLHelperForm) =
+        (* Functions in chialisp are unary
+         * We write every function as:
+         *
+         * fun myfunc (arg: CLSExp): CLSExp = <body>
+         *
+         *)
+        fun convertDefunDeclaration name args (body : CLBodyForm) =
+            let
+                val toplevelArgNames = Vector.fromList [
+                        (Ast.Pat.var (Ast.Var.fromSymbol (Symbol.fromString name, region))),
+                        (Ast.Pat.var (Ast.Var.fromSymbol (Symbol.fromString "arg", region)))
+                    ]
+                val letForm = convertExpression body
+            in
+                [Wrap.makeRegion (
+                      (Ast.Dec.Fun
+                           {tyvars=Vector.fromList [],
+                            fbs=Vector.fromList [
+                                Vector.fromList [
+                                    {body=letForm,
+                                     pats=toplevelArgNames,
+                                     resultType=NONE
+                                    }
+                                ]
+                           ]}
+                      ), region
+                  )]
+            end
+
+        fun convertDefconstDeclaration name (body: CLBodyForm) =
+            let
+                val constantName: Ast.Longvid.t =
+                    Ast.Longvid.fromSymbols ([Symbol.fromString name], region)
+
+                val pattern =
+                    Wrap.makeRegion
+                        (Ast.Pat.Var {fixop=Ast.Fixop.None, name=constantName},
+                         region
+                        )
+
+                val convertedVbs = {exp=convertExpression body, pat=pattern}
+            in
+                [Wrap.makeRegion (
+                      Ast.Dec.Val
+                          {rvbs=Vector.fromList [],
+                           tyvars=Vector.fromList [],
+                           vbs=Vector.fromList [convertedVbs]
+                          },
+                      region
+                  )
+                ]
+            end
+
+        fun convertHelperDeclaration (decl: CLHelperForm): Ast.Dec.t list =
             case decl of
                 CLDefun {inline, name, args, body} =>
                 convertDefunDeclaration name args body
@@ -786,7 +839,7 @@ fun chialispToML
               | CLDefconst {name, body} => convertDefconstDeclaration name body
 
         val helperDeclarations: Ast.Dec.t list =
-            []
+            List.concat (map convertHelperDeclaration helpers)
 
         val mainFunction: Ast.Dec.t list =
             []
@@ -810,8 +863,21 @@ fun frontendChialispToCoreDecs (fe: Ast.Program.t): Elaborate.Env.Decs.t =
     end
 
 fun readSsaJson (fname: String.t) =
-    case decodeFromJSON decodeCompileForm fname of
-        SOME s => print (sexpToDebugString (compileFormToSExp s))
-      | NONE => print "didn't decode"
+    let
+        val decodedProgram = decodeFromJSON decodeCompileForm fname
 
+        val prog =
+            case decodedProgram of
+                SOME p => SOME (chialispToML p)
+              | NONE => NONE
+    in
+        case prog of
+            SOME s =>
+            let
+                val progLayout = Ast.Program.layout s
+            in
+                print (Layout.toString progLayout)
+            end
+          | NONE => print "didn't convert"
+    end
 end

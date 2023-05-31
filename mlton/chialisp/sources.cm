@@ -11,6 +11,7 @@ is
 ../control/sources.cm
 ../front-end/sources.cm
 ../elaborate/sources.cm
+../xml/sources.cm
 
 chialisp.sig
 chialisp.fun
